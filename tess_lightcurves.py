@@ -1,11 +1,47 @@
+import numpy as np
+from astropy.io import fits
+import matplotlib.pyplot as plt
+from scipy.signal import savgol_filter
+from astropy.stats import BoxLeastSquares # astropy.timeseries?
+import os
 
+def tess_lightcurves(filename, TIC, output_dir):
+    
+    time, flux, tpf_hdr, tpf_mask = unpack(filename)
+    mean_img = np.median(flux, axis=0)
+    plot_img(mean_img)
+    
+    pix_mask = get_aperture(flux, mean_img, tpf_mask)
+    plot_aperture(TIC, mean_img, pix_mask)
+    sap_flux = simple_aperture_photometry(flux, pix_mask)
+    plot_lightcurve(TIC, time, sap_flux, "raw light curve")
+    
+    pld_flux = pixel_level_deconvolution(flux, sap_flux, pix_mask)
+    lightcurve = sap_flux - pld_flux
+    plot_lightcurve(TIC, time, lightcurve, "initial de-trended light curve")
+    bls, bls_power, period_grid = periodogram(time, lightcurve)
+    
+    # Save the highest peak as the planet candidate
+    index = np.argmax(bls_power.power)
+    bls_period = bls_power.period[index]
+    bls_t0 = bls_power.transit_time[index]
+    bls_depth = bls_power.depth[index]
+    transit_mask = bls.transit_mask(time, bls_period, 0.2, bls_t0)
+    
+    fig, axes = plt.subplots(2, 1, figsize=(10, 10))
+    plot_periodogram(axes[0], bls_power, bls_period, period_grid)
+    plot_transit(axes[1], time, lightcurve, bls_period, bls_t0)
+    
+    plt.title("TIC"+str(TIC))
+    plt.savefig(os.path.join(output_dir, str(TIC)+'_period_detrend_lc.pdf'))
+    plt.close()
+    
+    pld_flux = pixel_level_deconvolution(flux, sap_flux, pix_mask, transit_mask)
+    final_lightcurve = sap_flux - pld_flux
+    plot_lightcurve(TIC, time, final_lightcurve, "final de-trended light curve")
+    plot_folded_pldmodel(TIC, time, pld_flux, bls_period, bls_t0)
 
-
-def tess_lightcurves(filename,TIC):
-
-    import numpy as np
-    from astropy.io import fits
-    import matplotlib.pyplot as plt
+def unpack(filename):
     
     tpf_url = str(filename)
     with fits.open(tpf_url) as hdus:
@@ -19,16 +55,21 @@ def tess_lightcurves(filename,TIC):
     time = np.ascontiguousarray(time[m] - np.min(time[m]), dtype=np.float64)
     flux = np.ascontiguousarray(flux[m], dtype=np.float64)
     
-    mean_img = np.median(flux, axis=0)
-    plt.imshow(mean_img.T, cmap="gray_r")
+    return time, flux, tpf_hdr, tpf_mask
+
+def plot_img(img):
+    
+    plt.imshow(img.T, cmap="gray_r")
     plt.title("TESS image of Pi Men")
     plt.xticks([])
     plt.yticks([]);
     
-    from scipy.signal import savgol_filter
+def get_aperture(flux, img, tpf_mask):
+    
+    mean_img = np.median(flux, axis=0)
     
     # Sort the pixels by median brightness
-    order = np.argsort(mean_img.flatten())[::-1]
+    order = np.argsort(img.flatten())[::-1]
     
     # A function to estimate the windowed scatter in a lightcurve
     def estimate_scatter_with_mask(mask):
@@ -48,27 +89,34 @@ def tess_lightcurves(filename,TIC):
     
     # Choose the aperture that minimizes the scatter
     pix_mask = masks[np.argmin(scatters)]
-    
+    return pix_mask
+
+def plot_aperture(TIC, img, pix_mask):
     # Plot the selected aperture
-    plt.imshow(mean_img.T, cmap="gray_r")
+    plt.imshow(img.T, cmap="gray_r")
     plt.imshow(pix_mask.T, cmap="Reds", alpha=0.3)
     plt.title("TIC"+str(TIC)+": selected aperture ")
     plt.xticks([])
     plt.yticks([])
-#    plt.savefig('/Users/Admin/Documents/Research_Lisa/TESS/plots/'+str(TIC)+'_aperture.pdf')
     plt.close()
+
+def simple_aperture_photometry(flux, pix_mask):
+    
+    sap_flux = np.sum(flux[:, pix_mask], axis=-1)
+    sap_flux = (sap_flux / np.median(sap_flux) - 1)
+    return sap_flux
+
+def plot_lightcurve(TIC, time, lightcurve, descr):
     
     plt.figure(figsize=(10, 5))
-    sap_flux = np.sum(flux[:, pix_mask], axis=-1)
-    sap_flux = (sap_flux / np.median(sap_flux) - 1) * 1e3
-    plt.plot(time, sap_flux, "k")
+    plt.plot(time, lightcurve*100, "k")
     plt.xlabel("time [days]")
-    plt.ylabel("relative flux [ppt]")
-    plt.title("TIC"+str(TIC)+": raw light curve")
+    plt.ylabel("relative flux [percent]")
+    plt.title("TIC"+str(TIC)+": "+descr)
     plt.xlim(time.min(), time.max())
-#    plt.savefig('/Users/Admin/Documents/Research_Lisa/TESS/plots/'+str(TIC)+'_raw_lc.pdf')
     plt.close()
-    
+
+def pixel_level_deconvolution(flux, sap_flux, pix_mask, transit_mask=None):
     # Build the first order PLD basis
     X_pld = np.reshape(flux[:, pix_mask], (len(flux), -1))
     X_pld = X_pld / np.sum(flux[:, pix_mask], axis=-1)[:, None]
@@ -80,38 +128,27 @@ def tess_lightcurves(filename,TIC):
     
     # Construct the design matrix and fit for the PLD model
     X_pld = np.concatenate((np.ones((len(flux), 1)), X_pld, X2_pld), axis=-1)
-    XTX = np.dot(X_pld.T, X_pld)
-    w_pld = np.linalg.solve(XTX, np.dot(X_pld.T, sap_flux))
+    if transit_mask is not None:
+        m = ~transit_mask
+        XTX = np.dot(X_pld[m].T, X_pld[m])
+        w_pld = np.linalg.solve(XTX, np.dot(X_pld[m].T, sap_flux[m]))
+    else:
+        XTX = np.dot(X_pld.T, X_pld)
+        w_pld = np.linalg.solve(XTX, np.dot(X_pld.T, sap_flux))
     pld_flux = np.dot(X_pld, w_pld)
     
-    # Plot the de-trended light curve
-    plt.figure(figsize=(10, 5))
-    plt.plot(time, sap_flux-pld_flux, "k")
-    plt.xlabel("time [days]")
-    plt.ylabel("de-trended flux [ppt]")
-    plt.title("TIC"+str(TIC)+": initial de-trended light curve")
-    plt.xlim(time.min(), time.max())
-#    plt.savefig('/Users/Admin/Documents/Research_Lisa/TESS/plots/'+str(TIC)+'_detrend_lc.pdf')
-    plt.close()
+    return pld_flux
     
-    from astropy.stats import BoxLeastSquares
+def periodogram(time, lightcurve):
     
     period_grid = np.exp(np.linspace(np.log(1), np.log(15), 50000))
     
-    bls = BoxLeastSquares(time, sap_flux - pld_flux)
+    bls = BoxLeastSquares(time, lightcurve)
     bls_power = bls.power(period_grid, 0.1, oversample=20)
-    
-    # Save the highest peak as the planet candidate
-    index = np.argmax(bls_power.power)
-    bls_period = bls_power.period[index]
-    bls_t0 = bls_power.transit_time[index]
-    bls_depth = bls_power.depth[index]
-    transit_mask = bls.transit_mask(time, bls_period, 0.2, bls_t0)
-    
-    fig, axes = plt.subplots(2, 1, figsize=(10, 10))
-    
+    return bls, bls_power, period_grid
+
+def plot_periodogram(ax, bls_power, bls_period, period_grid):
     # Plot the periodogram
-    ax = axes[0]
     ax.axvline(np.log10(bls_period), color="C1", lw=5, alpha=0.8)
     ax.plot(np.log10(bls_power.period), bls_power.power, "k")
     ax.annotate("period = {0:.4f} d".format(bls_period),
@@ -122,65 +159,47 @@ def tess_lightcurves(filename,TIC):
     ax.set_yticks([])
     ax.set_xlim(np.log10(period_grid.min()), np.log10(period_grid.max()))
     ax.set_xlabel("log10(period)")
-    
+    return ax
+
+def plot_transit(ax, time, lightcurve, cand_period, cand_t0):
     # Plot the folded transit
-    ax = axes[1]
-    x_fold = (time - bls_t0 + 0.5*bls_period)%bls_period - 0.5*bls_period
+    x_fold = (time - cand_t0 + 0.5*cand_period)%cand_period - 0.5*cand_period
     m = np.abs(x_fold) < 0.4
-    ax.plot(x_fold[m], sap_flux[m] - pld_flux[m], ".k")
+    ax.plot(x_fold[m], lightcurve[m]*100, ".k")
     
     # Overplot the phase binned light curve
     bins = np.linspace(-0.41, 0.41, 32)
     denom, _ = np.histogram(x_fold, bins)
-    num, _ = np.histogram(x_fold, bins, weights=sap_flux - pld_flux)
+    num, _ = np.histogram(x_fold, bins, weights=lightcurve*100)
     denom[num == 0] = 1.0
     ax.plot(0.5*(bins[1:] + bins[:-1]), num / denom, color="C1")
     
     ax.set_xlim(-0.3, 0.3)
-    ax.set_ylabel("de-trended flux [ppt]")
+    ax.set_ylabel("de-trended flux [percent]")
     ax.set_xlabel("time since transit")
-    plt.title("TIC"+str(TIC))
-    plt.savefig('/Users/Admin/Documents/Research_Lisa/TESS/plots/'+str(TIC)+'_period_detrend_lc.pdf')
-    plt.close()
-    
-    m = ~transit_mask
-    XTX = np.dot(X_pld[m].T, X_pld[m])
-    w_pld = np.linalg.solve(XTX, np.dot(X_pld[m].T, sap_flux[m]))
-    pld_flux = np.dot(X_pld, w_pld)
-    
-    x = np.ascontiguousarray(time, dtype=np.float64)
-    y = np.ascontiguousarray(sap_flux-pld_flux, dtype=np.float64)
-    
-    plt.figure(figsize=(10, 5))
-    plt.plot(time, y, "k")
-    plt.xlabel("time [days]")
-    plt.ylabel("de-trended flux [ppt]")
-    plt.title("TIC"+str(TIC)+": final de-trended light curve")
-    plt.xlim(time.min(), time.max())
-#    plt.savefig('/Users/Admin/Documents/Research_Lisa/TESS/plots/'+str(TIC)+'_detrend_lc_final.pdf')
-    plt.close()
+    return ax
 
+def plot_folded_pldmodel(TIC, time, pld_flux, cand_period, cand_t0):
     
     plt.figure(figsize=(10, 5))
     
-    x_fold = (x - bls_t0 + 0.5*bls_period) % bls_period - 0.5*bls_period
+    x_fold = (time - cand_t0 + 0.5*cand_period) % cand_period - 0.5*cand_period
     m = np.abs(x_fold) < 0.3
-    plt.plot(x_fold[m], pld_flux[m], ".k", ms=4)
+    plt.plot(x_fold[m], pld_flux[m]*100, ".k", ms=4)
     
     bins = np.linspace(-0.5, 0.5, 60)
     denom, _ = np.histogram(x_fold, bins)
-    num, _ = np.histogram(x_fold, bins, weights=pld_flux)
+    num, _ = np.histogram(x_fold, bins, weights=pld_flux*100)
     denom[num == 0] = 1.0
     plt.plot(0.5*(bins[1:] + bins[:-1]), num / denom, color="C1", lw=2)
     plt.xlim(-0.2, 0.2)
     plt.title("TIC"+str(TIC))
     plt.xlabel("time since transit")
-    plt.ylabel("PLD model flux")
-#    plt.savefig('/Users/Admin/Documents/Research_Lisa/TESS/plots/'+str(TIC)+'_PLD_model.pdf')
+    plt.ylabel("PLD model flux [percent]")
     plt.close()
 
 name = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0002/6113/6679/tess2018206045859-s0001-0000000261136679-0120-s_tp.fits"
 name2 = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0003/0003/3922/tess2018206045859-s0001-0000000300033922-0120-s_tp.fits"
 name3 = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0002/6113/6679/tess*_tp.fits"
 
-tess_lightcurves(name,261136679)
+tess_lightcurves(name, 261136679, os.getcwd())
