@@ -10,7 +10,7 @@ def tess_lightcurves(filename, TIC, output_dir, show_plots=False):
     time, flux, tpf_hdr, tpf_mask = unpack(filename)
     mean_img = np.median(flux, axis=0)
     if show_plots:
-        plot_img(mean_img)
+        plot_img(TIC, mean_img)
     
     pix_mask = get_aperture(flux, mean_img, tpf_mask)
     if show_plots:
@@ -67,10 +67,10 @@ def unpack(filename):
     
     return time, flux, tpf_hdr, tpf_mask
 
-def plot_img(img):
+def plot_img(TIC, img):
     
     plt.imshow(img.T, cmap="gray_r")
-    plt.title("TESS image of Pi Men")
+    plt.title("TESS image of TIC"+str(TIC))
     plt.xticks([])
     plt.yticks([])
     plt.show()
