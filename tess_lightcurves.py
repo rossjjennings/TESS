@@ -213,4 +213,4 @@ name = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0002/6113/6679/te
 name2 = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0003/0003/3922/tess2018206045859-s0001-0000000300033922-0120-s_tp.fits"
 name3 = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0002/6113/6679/tess*_tp.fits"
 
-tess_lightcurves(name, 261136679, os.getcwd())
+tess_lightcurves(name, 261136679, os.getcwd(), show_plots=True)
