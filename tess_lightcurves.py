@@ -209,8 +209,9 @@ def plot_folded_pldmodel(TIC, time, pld_flux, cand_period, cand_t0):
     plt.ylabel("PLD model flux [percent]")
     plt.show()
 
-name = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0002/6113/6679/tess2018206045859-s0001-0000000261136679-0120-s_tp.fits"
-name2 = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0003/0003/3922/tess2018206045859-s0001-0000000300033922-0120-s_tp.fits"
-name3 = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0002/6113/6679/tess*_tp.fits"
+if __name__ == '__main__':
+    name = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0002/6113/6679/tess2018206045859-s0001-0000000261136679-0120-s_tp.fits"
+    name2 = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0003/0003/3922/tess2018206045859-s0001-0000000300033922-0120-s_tp.fits"
+    name3 = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0002/6113/6679/tess*_tp.fits"
 
-tess_lightcurves(name, 261136679, os.getcwd(), show_plots=True)
+    tess_lightcurves(name, 261136679, os.getcwd(), show_plots=True)
