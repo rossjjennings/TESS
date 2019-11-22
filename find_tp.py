@@ -48,21 +48,10 @@ def find_tp(TIC,sec):
     fn = 0
     
     # Make sure that the TIC is zero-padded to be 16 digits
-    l = len(str(TIC))
-    if l < 16:
-        # Figure out how many zeroes need to be added to the front of the TIC
-        n = 16 - l
-        for i in range(n):
-            TIC = '0'+str(TIC)
+    TIC = '{:016}'.format(TIC)
             
     # Make sure that the sector number is zero-padded to be 4 digits
-    ls = len(str(sec))
-    if ls < 4:
-        # Figure out how many zeros need to be added to the front of the TIC
-        ns = 4 - ls
-        for i in range(ns):
-            sec = '0'+str(sec)
-        
+    sec = '{:04}'.format(sec)
             
     # Construct the string of the file location
     fl = 'tid/s'+str(sec)+'/'+str(TIC[0:4])+'/'+str(TIC[4:8])+'/'+\
@@ -70,7 +59,6 @@ def find_tp(TIC,sec):
     
     # Add to the base link
     fl = 'https://archive.stsci.edu/missions/tess/'+str(fl)
-    
     
     # Search for correct directory
     r = requests.get(fl)
@@ -99,18 +87,5 @@ def find_tp(TIC,sec):
     if fn == 0:
         m = 0
         print("No image found.")
-        
-            
             
     return m,fl,fn
-            
-            
-            
-        
-            
-            
-
-
-                
-                
-              
