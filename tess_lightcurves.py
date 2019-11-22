@@ -5,20 +5,24 @@ from scipy.signal import savgol_filter
 from astropy.stats import BoxLeastSquares # astropy.timeseries?
 import os
 
-def tess_lightcurves(filename, TIC, output_dir):
+def tess_lightcurves(filename, TIC, output_dir, show_plots=False):
     
     time, flux, tpf_hdr, tpf_mask = unpack(filename)
     mean_img = np.median(flux, axis=0)
-    plot_img(mean_img)
+    if show_plots:
+        plot_img(mean_img)
     
     pix_mask = get_aperture(flux, mean_img, tpf_mask)
-    plot_aperture(TIC, mean_img, pix_mask)
+    if show_plots:
+        plot_aperture(TIC, mean_img, pix_mask)
     sap_flux = simple_aperture_photometry(flux, pix_mask)
-    plot_lightcurve(TIC, time, sap_flux, "raw light curve")
+    if show_plots:
+        plot_lightcurve(TIC, time, sap_flux, "raw light curve")
     
     pld_flux = pixel_level_deconvolution(flux, sap_flux, pix_mask)
     lightcurve = sap_flux - pld_flux
-    plot_lightcurve(TIC, time, lightcurve, "initial de-trended light curve")
+    if show_plots:
+        plot_lightcurve(TIC, time, lightcurve, "initial de-trended light curve")
     bls, bls_power, period_grid = periodogram(time, lightcurve)
     
     # Save the highest peak as the planet candidate
@@ -32,14 +36,20 @@ def tess_lightcurves(filename, TIC, output_dir):
     plot_periodogram(axes[0], bls_power, bls_period, period_grid)
     plot_transit(axes[1], time, lightcurve, bls_period, bls_t0)
     
-    plt.title("TIC"+str(TIC))
+    axes[0].set_title("TIC"+str(TIC))
     plt.savefig(os.path.join(output_dir, str(TIC)+'_period_detrend_lc.pdf'))
-    plt.close()
+    if show_plots:
+        plt.show()
     
     pld_flux = pixel_level_deconvolution(flux, sap_flux, pix_mask, transit_mask)
     final_lightcurve = sap_flux - pld_flux
-    plot_lightcurve(TIC, time, final_lightcurve, "final de-trended light curve")
-    plot_folded_pldmodel(TIC, time, pld_flux, bls_period, bls_t0)
+    if show_plots:
+        plot_lightcurve(TIC, time, final_lightcurve, "final de-trended light curve")
+        plot_folded_pldmodel(TIC, time, pld_flux, bls_period, bls_t0)
+    
+    plt.close()
+    
+    return final_lightcurve, bls_period, bls_t0, bls_depth
 
 def unpack(filename):
     
@@ -62,7 +72,8 @@ def plot_img(img):
     plt.imshow(img.T, cmap="gray_r")
     plt.title("TESS image of Pi Men")
     plt.xticks([])
-    plt.yticks([]);
+    plt.yticks([])
+    plt.show()
     
 def get_aperture(flux, img, tpf_mask):
     
@@ -98,7 +109,7 @@ def plot_aperture(TIC, img, pix_mask):
     plt.title("TIC"+str(TIC)+": selected aperture ")
     plt.xticks([])
     plt.yticks([])
-    plt.close()
+    plt.show()
 
 def simple_aperture_photometry(flux, pix_mask):
     
@@ -114,7 +125,7 @@ def plot_lightcurve(TIC, time, lightcurve, descr):
     plt.ylabel("relative flux [percent]")
     plt.title("TIC"+str(TIC)+": "+descr)
     plt.xlim(time.min(), time.max())
-    plt.close()
+    plt.show()
 
 def pixel_level_deconvolution(flux, sap_flux, pix_mask, transit_mask=None):
     # Build the first order PLD basis
@@ -196,7 +207,7 @@ def plot_folded_pldmodel(TIC, time, pld_flux, cand_period, cand_t0):
     plt.title("TIC"+str(TIC))
     plt.xlabel("time since transit")
     plt.ylabel("PLD model flux [percent]")
-    plt.close()
+    plt.show()
 
 name = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0002/6113/6679/tess2018206045859-s0001-0000000261136679-0120-s_tp.fits"
 name2 = "https://archive.stsci.edu/missions/tess/tid/s0001/0000/0003/0003/3922/tess2018206045859-s0001-0000000300033922-0120-s_tp.fits"
